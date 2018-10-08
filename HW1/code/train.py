@@ -25,6 +25,7 @@ if __name__ == '__main__':
     parser.add_argument("--batchSize", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--flg_cuda", action='store_true')
+    parser.add_argument("--n_batch", type=int, default=1)
 
     parser.add_argument("--dimEmb", type=int, default=100)  # Dimension of embedding
     parser.add_argument("--nVocab", type=int, default=20000)  # Vocabulary size
@@ -38,10 +39,13 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    args.lr = [0.1, 0.001, 0.0001, 0.00001, 1.0][args.i - 1]
+
     torch.manual_seed(args.randSeed)  # For reproducible results
     if args.flgSave:
         if not os.path.isdir(args.savePath):
             os.mkdir(args.savePath)
+            pickle.dump(args, open(args.savePath + '_params.p', 'wb'))
 
     print('General parameters: ', args)
 
@@ -55,7 +59,7 @@ if __name__ == '__main__':
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batchSize, shuffle=True, pin_memory=True)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.batchSize, shuffle=False, pin_memory=True)
     else:
-        train_loader_pos = torch.utils.data.DataLoader(trainset, batch_size=args.batchSize, shuffle=True, pin_memory=False)
+        train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batchSize, shuffle=True, pin_memory=False)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.batchSize, shuffle=False, pin_memory=False)
 
     model_paras = {'doc_len': args.doc_len, 'dimEmb': args.dimEmb, 'nVocab': args.nVocab}
@@ -77,13 +81,13 @@ if __name__ == '__main__':
     print("Beginning Training")
     train_paras = {'n_iter': args.n_iter, 'log_interval': [args.logInterval, 1000], 'flg_cuda': args.flg_cuda,
                    'lr_decay': [args.lr, 0.9, args.lr_decay3, 1e-5, args.lr_decay_type],
-                   'flgSave': args.flgSave, 'savePath': args.savePath}
+                   'flgSave': args.flgSave, 'savePath': args.savePath, 'n_batch': args.n_batch}
 
     m = m.trainModel(train_paras, train_loader, test_loader, model, opt)
     start = time.time()
     _, lsTrainAccuracy, lsTestAccuracy = m.run()
-    print('Test F1 max: %.3f' % (np.max(lsTestAccuracy)))
-    print('Test F1 final: %.3f' % (lsTestAccuracy[-1]))
+    print('Test Acc max: %.3f' % (np.max(lsTestAccuracy)))
+    print('Test Acc final: %.3f' % (lsTestAccuracy[-1]))
     stopIdx = min(lsTestAccuracy.index(np.max(lsTestAccuracy)) * args.logInterval, args.n_iter)
     print('Stop at: %d' % (stopIdx))
     end = time.time()

@@ -2,6 +2,7 @@ from sklearn.feature_extraction.text import CountVectorizer
 import argparse
 import json
 import os
+import numpy as np
 
 # Script to tokenize text
 
@@ -61,3 +62,9 @@ if __name__ == '__main__':
     json.dump(train2, open(args.outPath + 'train.json', 'w'))
     json.dump(val2, open(args.outPath + 'val.json', 'w'))
     json.dump(test2, open(args.outPath + 'test.json', 'w'))
+
+    # Document length:
+    lsLen = [len(x[0]) for x in train]
+    print('Median doc size: ', np.percentile(lsLen, 50))
+    print('95 percentile: ', np.percentile(lsLen, 95))
+    print('Max: ', max(lsLen))

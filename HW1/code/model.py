@@ -5,11 +5,10 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Variable
-from sklearn import metrics
 import json
 import pickle
+import pdb
 
 
 #==== Data ======
@@ -91,7 +90,9 @@ class BagOfWords(nn.Module):
 
         # pay attention to padding_idx
         self.embed = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
-        self.linear = nn.Linear(emb_dim, 20)
+        self.linear = nn.Linear(emb_dim, 1)
+
+        self.params = list(self.embed.parameters()) + list(self.linear.parameters())
 
     def forward(self, words, mask):
         """
@@ -101,13 +102,14 @@ class BagOfWords(nn.Module):
         @param length: an int tensor of size (batch_size), which represents the non-trivial (excludes padding)
             length of each sentences in the data.
         """
+        batchsize = words.shape[0]
         out = self.embed(words)
         out = torch.sum(out, dim=1)
-        out /= torch.sum(mask, dim=1)
+        out = torch.div(out, torch.clamp(torch.sum(mask, dim=1), min=1).view(batchsize, 1))
 
-        # return logits
-        out = self.linear(out.float())
-        return out
+        # return sigmoid
+        out = self.linear(out)
+        return torch.sigmoid(out).view(batchsize)
 
 
 #====== Training =======
@@ -119,7 +121,7 @@ class trainModel(object):
         self.optimizer = optimizer
 
         # self.train_paras = train_paras
-        self.n_batch = train_paras.get('n_batch', 10) # Use this to adjust how many batches as one epoch
+        self.n_batch = train_paras.get('n_batch', 1) # Use this to adjust how many batches as one epoch
         self.n_iter = train_paras.get('n_iter', 1)
         self.log_interval = train_paras.get('log_interval', 1)
         self.flg_cuda = train_paras.get('flg_cuda', False)
@@ -127,32 +129,32 @@ class trainModel(object):
         self.lr_decay = train_paras.get('lr_decay', None)  # List of 4 numbers: [init_lr, lr_decay_rate, lr_decay_interval, min_lr, decay_type]
         self.flgSave = train_paras.get('flgSave', False)  # Set to true if save model
         self.savePath = train_paras.get('savePath', './')
-        self.alpha_L1 = train_paras.get('alpha_L1', 0.0)  # Regularization coefficient on fully connected weights
+        #self.alpha_L1 = train_paras.get('alpha_L1', 0.0)  # Regularization coefficient on fully connected weights
 
         if self.lr_decay:
             assert len(self.lr_decay) == 5  # Elements include: [starting_lr, decay_multiplier, decay_per_?_epoch, min_lr, decay_type]
-        self.criterion = torch.nn.CrossEntropyLoss()
+        self.criterion = torch.nn.BCELoss()
         self.cnt_iter = 0
 
         self.lsTrainAccuracy = []
         self.lsTestAccuracy = []
         self.lsEpochNumber = []
         self.bestAccuracy = 0.0
-        self.auc = 0.0
-
+        self.acc = 0.0
 
     def run(self):
         for epoch in range(self.n_iter):
             self._train(epoch)
             self._test(epoch)
             pickle.dump([self.lsEpochNumber, self.lsTrainAccuracy, self.lsTestAccuracy], open(self.savePath + '_accuracy.p', 'wb'))
-            if self.auc > self.bestAccuracy:
-                self.bestAccuracy = self.auc
+            if self.acc > self.bestAccuracy:
+                self.bestAccuracy = self.acc
                 if self.flgSave:
                     self._saveModel()
+                    self._savePrediction()
         return self.model, self.lsTrainAccuracy, self.lsTestAccuracy
 
-    def _train(self, epoch, lsTrainAccuracy):
+    def _train(self, epoch):
         correct, train_loss = 0, 0
         self.model.train()
         if self.lr_decay:
@@ -160,8 +162,9 @@ class trainModel(object):
                 lr = min(self.lr_decay[0] / (epoch // self.lr_decay[2] + 1), self.lr_decay[3]) # Linear decay
             elif (self.lr_decay[4] == 'exp'):
                 lr = min(self.lr_decay[0] * (self.lr_decay[1] ** (epoch // self.lr_decay[2])), self.lr_decay[3]) # Exponential decay
-            for param_group in self.optimizer.param_groups:
-                param_group['lr'] = lr
+            if self.lr_decay[4] != 'None':
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = lr
         j, nRec = 0, 0
 
         self.Y_train = []
@@ -173,7 +176,7 @@ class trainModel(object):
             words, labels, mask = sample['words'], sample['labels'], sample['mask']
 
             nRec += words.size()[0]
-            words, labels, mask = Variable(words).long(), Variable(labels).long(), Variable(mask).float()
+            words, labels, mask = Variable(words).long(), Variable(labels).float(), Variable(mask).float()
 
             self.cnt_iter += 1
 
@@ -200,21 +203,20 @@ class trainModel(object):
             self.target_train.append(labels.data.cpu().numpy())
 
             correct += self._getAccuracy(output, labels)
-            train_loss += loss.data[0]
+            train_loss += loss.data.item()
             j += 1
             if (j % self.log_interval[1] == 0):
-                train_loss_temp = train_loss / np.sum(nRec)
+                train_loss_temp = train_loss / nRec
                 print('Train Epoch: {}, Batch: {}, Loss: {:.4f}'.format(epoch, j, train_loss_temp))
 
         if (epoch == 0) | (epoch % self.log_interval[0] == 0) | (epoch == self.n_iter - 1):
             trainAccuracy = 100. * correct / nRec
-            train_loss /= np.sum(nRec)
+            train_loss /= nRec
             self.lsTrainAccuracy.append(trainAccuracy)
-
             print('\nTrain Epoch: {} Loss: {:.4f} Accuracy: {:.4f}'.format(epoch, train_loss, trainAccuracy))
 
 
-    def _test(self, epoch, lsTestAccuracy):
+    def _test(self, epoch):
         if (epoch == 0) | (epoch % self.log_interval[0] == 0) | (epoch == self.n_iter - 1):
 
             self.model.eval()
@@ -228,28 +230,35 @@ class trainModel(object):
                 words, labels, mask = sample['words'], sample['labels'], sample['mask']
                 nRec += words.size()[0]
 
-                words, labels, mask = Variable(words, volatile=True).long(), Variable(labels,volatile=True).long(), Variable(mask, volatile=True).float()
+                words, labels, mask = Variable(words).long(), Variable(labels).float(), Variable(mask).float()
                 if self.flg_cuda:
                     words, labels, mask = words.cuda(), labels.cuda(), mask.cuda()
                 with torch.no_grad():
-                    output = self.model(words, labels, mask)
-                    test_loss += (self.criterion(output, labels)).data[0]
+                    output = self.model(words, mask)
+                    test_loss += (self.criterion(output, labels)).data.item()
                     correct += self._getAccuracy(output, labels)
 
                 self.Y.append(output.data.cpu().numpy())
                 self.target.append(labels.data.cpu().numpy())
 
             testAccuracy = 100. * correct / nRec
-            test_loss /= np.sum(nRec)  # loss function already averages over batch size
+            test_loss /= nRec  # loss function already averages over batch size
             print('Test set: Average loss: {:.4f}, Accuracy: {:.4f}'.format(test_loss, testAccuracy))
             self.lsTestAccuracy.append(testAccuracy)
             self.lsEpochNumber.append(epoch)
+            self.acc = correct / nRec
 
     def _getAccuracy(self, output, target):
-        pred = output.max(1, keepdim=True)[1]
+        pred = (output.data > 0.5).float()
         accuracy = pred.eq(target.data).cpu().float().numpy()
-        accuracy = np.sum(accuracy, axis=0)
+        accuracy = np.sum(accuracy)
         return accuracy
 
     def _saveModel(self):
         torch.save(self.model, self.savePath + '_model.pt')
+
+    def _savePrediction(self, saveName=''):
+        Y_hat = np.concatenate(self.Y)
+        Y_hat_class = (Y_hat > 0.5)*1
+        Y = np.concatenate(self.target)
+        pickle.dump([Y_hat, Y_hat_class, Y], open(self.savePath + str(saveName) + '_pred.p', 'wb'))
