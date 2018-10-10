@@ -159,9 +159,9 @@ class trainModel(object):
         self.model.train()
         if self.lr_decay:
             if (self.lr_decay[4] == 'linear'):
-                lr = min(self.lr_decay[0] / (epoch // self.lr_decay[2] + 1), self.lr_decay[3]) # Linear decay
+                lr = max(self.lr_decay[0] * (1 - self.lr_decay[1] * (epoch // self.lr_decay[2]) ), self.lr_decay[3]) # Linear decay
             elif (self.lr_decay[4] == 'exp'):
-                lr = min(self.lr_decay[0] * (self.lr_decay[1] ** (epoch // self.lr_decay[2])), self.lr_decay[3]) # Exponential decay
+                lr = max(self.lr_decay[0] * (self.lr_decay[1] ** (epoch // self.lr_decay[2])), self.lr_decay[3]) # Exponential decay
             if self.lr_decay[4] != 'None':
                 for param_group in self.optimizer.param_groups:
                     param_group['lr'] = lr

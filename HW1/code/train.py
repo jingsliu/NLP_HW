@@ -18,6 +18,7 @@ if __name__ == '__main__':
     parser.add_argument("--doc_len", type=int, default=300)
     parser.add_argument("--n_iter", type=int, default=10)
     parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--lr_decay_rate", type=float, default=0.9) # Rate of learning rate decay
     parser.add_argument("--lr_decay3", type=int, default=1)  # Decay learning rate every lr_decay3 epochs
     parser.add_argument("--lr_decay_type", default='linear')  # Decay learning rate by linear or exp
 
@@ -39,13 +40,18 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    args.lr = [0.1, 0.001, 0.0001, 0.00001, 1.0][args.i - 1]
+    #args.lr = [0.1, 0.001, 0.0001, 0.00001, 1.0, 0.01][args.i - 1]
+    #args.lr_decay_type = ['linear', 'linear', 'exp', 'exp'][args.i - 1]
+    #args.lr_decay_rate = [0.01, 0.05, 0.9, 0.9][args.i - 1]
+    #args.lr_decay3 = [1, 10, 1, 10][args.i - 1]
+    #args.dimEmb = [50, 100, 200, 300, 400][args.i - 1]
+
 
     torch.manual_seed(args.randSeed)  # For reproducible results
-    if args.flgSave:
-        if not os.path.isdir(args.savePath):
-            os.mkdir(args.savePath)
-            pickle.dump(args, open(args.savePath + '_params.p', 'wb'))
+
+    if not os.path.isdir(args.savePath):
+        os.mkdir(args.savePath)
+        pickle.dump(args, open(args.savePath + '_params.p', 'wb'))
 
     print('General parameters: ', args)
 
@@ -62,7 +68,7 @@ if __name__ == '__main__':
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batchSize, shuffle=True, pin_memory=False)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.batchSize, shuffle=False, pin_memory=False)
 
-    model_paras = {'doc_len': args.doc_len, 'dimEmb': args.dimEmb, 'nVocab': args.nVocab}
+    model_paras = {'doc_len': args.doc_len, 'dimEmb': args.dimEmb, 'nVocab': args.nVocab + 1}
 
     print('Model parameters: ', model_paras)
 
@@ -80,7 +86,7 @@ if __name__ == '__main__':
 
     print("Beginning Training")
     train_paras = {'n_iter': args.n_iter, 'log_interval': [args.logInterval, 1000], 'flg_cuda': args.flg_cuda,
-                   'lr_decay': [args.lr, 0.9, args.lr_decay3, 1e-5, args.lr_decay_type],
+                   'lr_decay': [args.lr, args.lr_decay_rate, args.lr_decay3, 1e-5, args.lr_decay_type],
                    'flgSave': args.flgSave, 'savePath': args.savePath, 'n_batch': args.n_batch}
 
     m = m.trainModel(train_paras, train_loader, test_loader, model, opt)

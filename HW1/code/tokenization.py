@@ -3,12 +3,14 @@ import argparse
 import json
 import os
 import numpy as np
+import pickle
+import pdb
 
 # Script to tokenize text
 
-def text2index(text, vocab, tokenizer):
+def text2index(text, vocab, analyzer):
     # words not in vocab are dropped
-    doc_toks = [vocab[y] for y in tokenizer(text) if y in vocab]
+    doc_toks = [vocab[y] for y in analyzer(text) if y in vocab]
     return doc_toks
 
 def build_vocab(text, max_df=.7, max_features=20000, stop_words= 'english', analyzer = 'word', ngram_range=(1, 1)):
@@ -53,18 +55,19 @@ if __name__ == '__main__':
                        stop_words=args.stop_words, analyzer=args.analyzer,
                        ngram_range=(args.ngramMin, args.ngramMax))
     vocab = vect.vocabulary_
-    tokenizer = vect.build_tokenizer()
+    analyzer = vect.build_analyzer()
 
-    train2 = [[text2index(x[0], vocab, tokenizer), x[1], x[2]] for x in train]
-    val2 = [[text2index(x[0], vocab, tokenizer), x[1], x[2]] for x in val]
-    test2 = [[text2index(x[0], vocab, tokenizer), x[1], x[2]] for x in test]
+    train2 = [[text2index(x[0], vocab, analyzer), x[1], x[2]] for x in train]
+    val2 = [[text2index(x[0], vocab, analyzer), x[1], x[2]] for x in val]
+    test2 = [[text2index(x[0], vocab, analyzer), x[1], x[2]] for x in test]
 
     json.dump(train2, open(args.outPath + 'train.json', 'w'))
     json.dump(val2, open(args.outPath + 'val.json', 'w'))
     json.dump(test2, open(args.outPath + 'test.json', 'w'))
+    pickle.dump(vect, open(args.outPath + 'vect.p', 'wb'))
 
     # Document length:
-    lsLen = [len(x[0]) for x in train]
+    lsLen = [len(x[0]) for x in train2]
     print('Median doc size: ', np.percentile(lsLen, 50))
     print('95 percentile: ', np.percentile(lsLen, 95))
     print('Max: ', max(lsLen))
